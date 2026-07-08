@@ -54,7 +54,8 @@ def start_tools():
     global flask_proc, local_url
 
     if flask_proc is not None:
-        print(f"\n  {Y}Already running.{RST}\n")
+        print(f"\n  {Y}Already running.{RST}")
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
         return
 
     print(f"\n  {C}Starting Flask backend...{RST}")
@@ -66,7 +67,8 @@ def start_tools():
     time.sleep(2)
 
     if flask_proc.poll() is not None:
-        print(f"  {R}Flask failed to start. Run 'python server.py' directly to see the error.{RST}\n")
+        print(f"  {R}Flask failed to start. Run 'python server.py' directly to see the error.{RST}")
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
         flask_proc = None
         return
 
@@ -79,9 +81,10 @@ def start_tools():
     print(box_line(local_url, width, f"{G}{BLD}"))
     print(box_border(width))
     print(f"\n  {DIM}{W}Open that link on any device connected to the SAME WiFi.{RST}\n")
+    input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
 
 
-def stop_tools():
+def stop_tools(pause=True):
     global flask_proc, local_url
 
     if flask_proc is not None:
@@ -95,13 +98,15 @@ def stop_tools():
                 pass
         flask_proc = None
         local_url = None
-        print(f"\n  {G}Stopped. Server closed.{RST}\n")
+        print(f"\n  {G}Stopped. Server closed.{RST}")
     else:
-        print(f"\n  {Y}Nothing is running.{RST}\n")
+        print(f"\n  {Y}Nothing is running.{RST}")
+    if pause:
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
 
 
 def exit_app():
-    stop_tools()
+    stop_tools(pause=False)
     print(f"  {O}{BLD}Bye - CODEX-M41NUL{RST}\n")
     sys.exit(0)
 
@@ -109,6 +114,8 @@ def exit_app():
 # ---------- menu ----------
 
 def show_menu():
+    clear_screen()
+    show_banner()
     status = f"{G}RUNNING{RST}" if flask_proc is not None else f"{DIM}{W}STOPPED{RST}"
     print(f"  {W}Status: {status}")
     if local_url:
@@ -124,6 +131,7 @@ def main():
     clear_screen()
     show_banner()
     ensure_all_dependencies()
+    input(f"  {DIM}{W}Press Enter to continue...{RST}")
 
     def handle_sigint(sig, frame):
         print()
@@ -142,7 +150,8 @@ def main():
         elif choice == "0":
             exit_app()
         else:
-            print(f"\n  {R}Invalid option. Choose 1, 2, or 0.{RST}\n")
+            print(f"\n  {R}Invalid option. Choose 1, 2, or 0.{RST}")
+            input(f"  {DIM}{W}Press Enter to continue...{RST}")
 
 
 if __name__ == "__main__":

@@ -33,14 +33,25 @@ def _check_py(module_name):
     return importlib.util.find_spec(module_name) is not None
 
 
-def _run(cmd, label):
+def _run(cmd, label, is_pkg=False):
     print(f"  {C}Installing {label}...{RST}")
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if result.returncode != 0:
-            print(f"  {R}Failed to install {label}.{RST}")
-            print(f"  {DIM}{W}{result.stdout[-400:]}{RST}")
-            return False
+            # Retry once after refreshing package lists (common cause: stale/broken mirror)
+            if is_pkg:
+                print(f"  {DIM}{W}Install failed, refreshing package list and retrying...{RST}")
+                subprocess.run(["pkg", "update", "-y"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+            if result.returncode != 0:
+                print(f"  {R}Failed to install {label}.{RST}")
+                print(f"  {DIM}{W}{result.stdout[-400:]}{RST}")
+                if is_pkg:
+                    print(f"  {Y}Tip: your Termux mirror may be broken. Try:{RST}")
+                    print(f"  {DIM}{W}  termux-change-repo{RST}")
+                    print(f"  {DIM}{W}then pick a different mirror and run this again.{RST}")
+                return False
         print(f"  {G}{label} installed.{RST}")
         return True
     except FileNotFoundError:
@@ -61,7 +72,7 @@ def ensure_all_dependencies():
             print(f"  {G}[ok]{RST}    {W}{pkg_name}{RST}")
         else:
             print(f"  {Y}[missing]{RST} {W}{pkg_name}{RST}")
-            ok = _run(["pkg", "install", pkg_name, "-y"], pkg_name)
+            ok = _run(["pkg", "install", pkg_name, "-y"], pkg_name, is_pkg=True)
             all_ok = all_ok and ok
 
     # 2) yt-dlp (installed via pip, but it's a CLI binary once installed)
