@@ -24,6 +24,11 @@ PY_CHECKS = [
     ("flask-cors",   "py",  "flask_cors"),
 ]
 
+# Optional: enables the ASCII QR code in the CLI. Not fatal if it fails to install.
+OPTIONAL_PY_CHECKS = [
+    ("qrcode", "py", "qrcode"),
+]
+
 
 def _check_bin(name):
     return shutil.which(name) is not None
@@ -59,6 +64,52 @@ def _run(cmd, label, is_pkg=False):
         return False
 
 
+_YTDLP_CHECK_FILE = ".ytdlp_last_check"
+
+
+def _self_update_ytdlp():
+    """
+    Startup version check: keeps yt-dlp fresh so YouTube extractor changes
+    don't silently break downloads. Skips the network check if it already
+    ran today, so it doesn't slow down every single launch.
+    """
+    import time
+    import os as _os
+
+    check_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), _YTDLP_CHECK_FILE)
+    today = time.strftime("%Y-%m-%d")
+
+    if _os.path.exists(check_path):
+        try:
+            with open(check_path, "r") as fh:
+                if fh.read().strip() == today:
+                    return  # already checked today
+        except OSError:
+            pass
+
+    print(f"  {DIM}{W}Checking for yt-dlp updates...{RST}")
+    try:
+        result = subprocess.run(
+            ["pip", "install", "-U", "--break-system-packages", "yt-dlp"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60
+        )
+        if result.returncode == 0:
+            if "Successfully installed" in result.stdout:
+                print(f"  {G}yt-dlp updated to the latest version.{RST}")
+            else:
+                print(f"  {G}yt-dlp is already up to date.{RST}")
+        else:
+            print(f"  {Y}Could not check yt-dlp updates (offline or mirror issue) — continuing.{RST}")
+    except Exception:
+        print(f"  {Y}Could not check yt-dlp updates — continuing.{RST}")
+
+    try:
+        with open(check_path, "w") as fh:
+            fh.write(today)
+    except OSError:
+        pass
+
+
 def ensure_all_dependencies():
     """Check every required tool/library; install only what's missing. Returns True if all OK."""
     print(f"\n  {Y}{BLD}Checking dependencies...{RST}\n")
@@ -79,6 +130,7 @@ def ensure_all_dependencies():
     ytdlp_installed = _check_bin("yt-dlp")
     if ytdlp_installed:
         print(f"  {G}[ok]{RST}    {W}yt-dlp{RST}")
+        _self_update_ytdlp()
     else:
         print(f"  {Y}[missing]{RST} {W}yt-dlp{RST}")
         ok = _run(["pip", "install", "-U", "--break-system-packages", "yt-dlp"], "yt-dlp")
@@ -95,6 +147,16 @@ def ensure_all_dependencies():
             print(f"  {Y}[missing]{RST} {W}{pkg_name}{RST}")
             ok = _run(["pip", "install", "--break-system-packages", pkg_name], pkg_name)
             all_ok = all_ok and ok
+
+    # 4) Optional: qrcode (for the CLI QR link display) — best-effort only
+    for pkg_name, kind, value in OPTIONAL_PY_CHECKS:
+        installed = _check_py(value)
+        if installed:
+            print(f"  {G}[ok]{RST}    {W}{pkg_name}{RST} {DIM}(optional){RST}")
+        else:
+            print(f"  {Y}[missing]{RST} {W}{pkg_name}{RST} {DIM}(optional){RST}")
+            _run(["pip", "install", "--break-system-packages", pkg_name], pkg_name)
+            # optional: failure here doesn't affect all_ok
 
     print()
     if all_ok:

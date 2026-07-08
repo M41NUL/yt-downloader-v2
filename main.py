@@ -7,16 +7,19 @@ import os
 import sys
 import time
 import json
+import glob
 import socket
 import signal
 import subprocess
 
 from banner import show_banner
 from utils import R, G, Y, C, O, W, BLD, DIM, RST, clear_screen
-from config import FLASK_HOST, FLASK_PORT, HISTORY_FILE
+from config import FLASK_HOST, FLASK_PORT, HISTORY_FILE, DOWNLOAD_DIR, VERSION
 from setup import ensure_all_dependencies
+import settings as settings_mod
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOWNLOAD_PATH = os.path.join(BASE_DIR, DOWNLOAD_DIR)
 
 flask_proc = None
 local_url = None
@@ -47,6 +50,56 @@ def box_line(text, width, color=W):
 
 def box_border(width, corner_l="+", corner_r="+"):
     return f"  {O}{BLD}{corner_l}{'-' * width}{corner_r}{RST}"
+
+
+def get_yt_dlp_version():
+    try:
+        result = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def print_qr(url):
+    """Best-effort ASCII QR code so the link can be scanned from another device."""
+    try:
+        import qrcode
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(url)
+        qr.make(fit=True)
+        matrix = qr.get_matrix()
+        print()
+        for row in matrix:
+            line = "  "
+            for cell in row:
+                line += "██" if cell else "  "
+            print(f"  {W}{line}{RST}")
+        print()
+    except ImportError:
+        print(f"  {DIM}{W}(Install 'qrcode' for a scannable QR code: pip install qrcode --break-system-packages){RST}")
+    except Exception:
+        pass  # QR is a nice-to-have; never block the app on it
+
+
+def count_downloads_left():
+    """Count leftover files/folders sitting in downloads/ (not yet cleaned up)."""
+    if not os.path.isdir(DOWNLOAD_PATH):
+        return 0
+    return len(glob.glob(os.path.join(DOWNLOAD_PATH, "*")))
+
+
+def get_live_stats():
+    """Poll the running Flask server for active job stats. Returns None if not running/unreachable."""
+    if flask_proc is None or local_url is None:
+        return None
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"{local_url}/api/stats", timeout=2) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
 
 
 # ---------- process control ----------
@@ -81,7 +134,10 @@ def start_tools():
     print(box_line("YOUR LINK IS READY", width, f"{Y}{BLD}"))
     print(box_line(local_url, width, f"{G}{BLD}"))
     print(box_border(width))
-    print(f"\n  {DIM}{W}Open that link on any device connected to the SAME WiFi.{RST}\n")
+    print(f"\n  {DIM}{W}Open that link on any device connected to the SAME WiFi.{RST}")
+
+    print_qr(local_url)
+
     input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
 
 
@@ -127,23 +183,163 @@ def show_history():
         input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
         return
 
-    print(f"  {Y}{BLD}Recent downloads (latest first){RST}\n")
-    for entry in reversed(history[-25:]):
-        status_color = G if entry.get("status") == "done" else R
-        status_text = "OK" if entry.get("status") == "done" else "FAILED"
-        mode = entry.get("mode", "video").upper()
-        quality = entry.get("quality", "auto")
-        title = entry.get("title") or "Untitled"
-        if len(title) > 40:
-            title = title[:37] + "..."
-        when = entry.get("time", "")
-        print(f"  {status_color}[{status_text}]{RST} {DIM}{when}{RST}  {C}{mode}{RST}/{quality}  {W}{title}{RST}")
+    print(f"  {Y}{BLD}Filter history{RST}")
+    print(f"  {O}[1]{RST} {W}All")
+    print(f"  {O}[2]{RST} {W}Video only")
+    print(f"  {O}[3]{RST} {W}Audio only")
+    print(f"  {O}[4]{RST} {W}Failed only")
+    print(f"  {O}[5]{RST} {W}Successful only")
+    choice = input(f"\n  {O}{BLD}> {RST}").strip()
+
+    def matches(entry):
+        mode = entry.get("mode", "video")
+        status = entry.get("status", "done")
+        if choice == "2":
+            return mode == "video"
+        if choice == "3":
+            return mode == "audio"
+        if choice == "4":
+            return status == "failed"
+        if choice == "5":
+            return status == "done"
+        return True
+
+    filtered = [e for e in reversed(history) if matches(e)]
+
+    print()
+    if not filtered:
+        print(f"  {Y}No matching entries.{RST}")
+    else:
+        print(f"  {Y}{BLD}Recent downloads (latest first) — {len(filtered)} shown{RST}\n")
+        for entry in filtered[:25]:
+            status_color = G if entry.get("status") == "done" else R
+            status_text = "OK" if entry.get("status") == "done" else "FAILED"
+            mode = entry.get("mode", "video").upper()
+            quality = entry.get("quality", "auto")
+            title = entry.get("title") or "Untitled"
+            if len(title) > 40:
+                title = title[:37] + "..."
+            when = entry.get("time", "")
+            print(f"  {status_color}[{status_text}]{RST} {DIM}{when}{RST}  {C}{mode}{RST}/{quality}  {W}{title}{RST}")
 
     print()
     input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
 
 
+def clear_downloads():
+    print()
+    if not os.path.isdir(DOWNLOAD_PATH):
+        print(f"  {Y}Downloads folder is already empty.{RST}")
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
+        return
+
+    items = glob.glob(os.path.join(DOWNLOAD_PATH, "*"))
+    if not items:
+        print(f"  {Y}Downloads folder is already empty.{RST}")
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
+        return
+
+    print(f"  {Y}{len(items)} item(s) found in downloads/.{RST}")
+    confirm = input(f"  {R}Delete all of them? This cannot be undone. (y/N): {RST}").strip().lower()
+    if confirm != "y":
+        print(f"  {DIM}{W}Cancelled.{RST}")
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
+        return
+
+    removed, failed = 0, 0
+    for item in items:
+        try:
+            if os.path.isdir(item):
+                import shutil
+                shutil.rmtree(item, ignore_errors=True)
+            else:
+                os.remove(item)
+            removed += 1
+        except OSError:
+            failed += 1
+
+    print(f"  {G}Removed {removed} item(s).{RST}" + (f" {R}({failed} failed){RST}" if failed else ""))
+    input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
+
+
+def check_ytdlp_update():
+    print(f"\n  {C}Checking yt-dlp for updates...{RST}")
+    current = get_yt_dlp_version()
+    if current:
+        print(f"  {DIM}{W}Current version: {current}{RST}")
+    try:
+        result = subprocess.run(
+            ["pip", "install", "-U", "--break-system-packages", "yt-dlp"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=90
+        )
+        if result.returncode == 0:
+            new_version = get_yt_dlp_version()
+            if "Successfully installed" in result.stdout:
+                print(f"  {G}yt-dlp updated.{RST} {DIM}{W}Now on {new_version}{RST}")
+            else:
+                print(f"  {G}yt-dlp is already up to date.{RST} {DIM}{W}({new_version}){RST}")
+        else:
+            print(f"  {R}Update check failed (offline or mirror issue).{RST}")
+            print(f"  {DIM}{W}{result.stdout[-300:]}{RST}")
+    except subprocess.TimeoutExpired:
+        print(f"  {R}Update check timed out.{RST}")
+    except Exception as e:
+        print(f"  {R}Update check failed: {e}{RST}")
+    input(f"\n  {DIM}{W}Press Enter to go back to menu...{RST}")
+
+
+# ---------- settings menu ----------
+
+def show_settings():
+    while True:
+        clear_screen()
+        show_banner()
+        current = settings_mod.get_all_settings()
+        print(f"  {Y}{BLD}Settings{RST}\n")
+        keys = list(settings_mod.DEFAULTS.keys())
+        for i, key in enumerate(keys, start=1):
+            desc = settings_mod.DESCRIPTIONS.get(key, key)
+            print(f"  {O}{BLD}[{i}]{RST} {W}{key}{RST} = {G}{current[key]}{RST}")
+            print(f"      {DIM}{W}{desc}{RST}")
+        print(f"\n  {O}{BLD}[r]{RST} {W}Reset all to defaults")
+        print(f"  {O}{BLD}[0]{RST} {W}Back to main menu\n")
+
+        choice = input(f"  {O}{BLD}> {RST}").strip().lower()
+        if choice == "0":
+            return
+        if choice == "r":
+            confirm = input(f"  {R}Reset ALL settings to defaults? (y/N): {RST}").strip().lower()
+            if confirm == "y":
+                settings_mod.reset_defaults()
+                print(f"  {G}Settings reset.{RST}")
+                input(f"  {DIM}{W}Press Enter to continue...{RST}")
+            continue
+
+        try:
+            idx = int(choice) - 1
+            if idx < 0 or idx >= len(keys):
+                raise ValueError
+        except ValueError:
+            print(f"  {R}Invalid option.{RST}")
+            input(f"  {DIM}{W}Press Enter to continue...{RST}")
+            continue
+
+        key = keys[idx]
+        new_value = input(f"  {W}New value for {C}{key}{RST} (current: {current[key]}): {RST}").strip()
+        if not new_value:
+            continue
+        ok, err = settings_mod.set_setting(key, new_value)
+        if ok:
+            print(f"  {G}Updated {key} -> {new_value}{RST}")
+        else:
+            print(f"  {R}Could not update: {err}{RST}")
+        input(f"  {DIM}{W}Press Enter to continue...{RST}")
+
+
 def exit_app():
+    leftover = count_downloads_left()
+    if leftover > 0:
+        print(f"\n  {Y}Note: {leftover} item(s) still in downloads/ (not yet cleaned up).{RST}")
     stop_tools(pause=False)
     print(f"  {O}{BLD}Bye - CODEX-M41NUL{RST}\n")
     sys.exit(0)
@@ -158,10 +354,31 @@ def show_menu():
     print(f"  {W}Status: {status}")
     if local_url:
         print(f"  {W}Link:   {C}{local_url}{RST}")
+
+    ytdlp_version = get_yt_dlp_version()
+    if ytdlp_version:
+        print(f"  {DIM}{W}yt-dlp {ytdlp_version}{RST}")
+
+    if flask_proc is not None:
+        stats = get_live_stats()
+        if stats:
+            active = stats.get("activeJobs", 0)
+            playlists = stats.get("activePlaylistJobs", 0)
+            if active > 0:
+                extra = f" ({playlists} playlist{'s' if playlists != 1 else ''})" if playlists else ""
+                print(f"  {C}Active downloads: {active}{extra}{RST}")
+
+    leftover = count_downloads_left()
+    if leftover > 0:
+        print(f"  {DIM}{W}Files pending cleanup: {leftover}{RST}")
+
     print()
     print(f"  {Y}{BLD}[1]{RST} {W}Start YT Downloader")
     print(f"  {Y}{BLD}[2]{RST} {W}Stop")
     print(f"  {Y}{BLD}[3]{RST} {W}History")
+    print(f"  {Y}{BLD}[4]{RST} {W}Settings")
+    print(f"  {Y}{BLD}[5]{RST} {W}Clear Downloads")
+    print(f"  {Y}{BLD}[6]{RST} {W}Check for yt-dlp Update")
     print(f"  {Y}{BLD}[0]{RST} {W}Exit")
     print()
 
@@ -188,10 +405,16 @@ def main():
             stop_tools()
         elif choice == "3":
             show_history()
+        elif choice == "4":
+            show_settings()
+        elif choice == "5":
+            clear_downloads()
+        elif choice == "6":
+            check_ytdlp_update()
         elif choice == "0":
             exit_app()
         else:
-            print(f"\n  {R}Invalid option. Choose 1, 2, 3, or 0.{RST}")
+            print(f"\n  {R}Invalid option. Choose 0-6.{RST}")
             input(f"  {DIM}{W}Press Enter to continue...{RST}")
 
 
