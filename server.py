@@ -187,11 +187,14 @@ def info():
 
             data_json = json.loads(result.stdout)
             entries = data_json.get("entries", []) or []
+            first_id = entries[0].get("id") if entries else None
+            cover_thumbnail = f"https://i.ytimg.com/vi/{first_id}/mqdefault.jpg" if first_id else None
             return jsonify({
                 "isPlaylist": True,
                 "title": data_json.get("title") or "Playlist",
                 "uploader": data_json.get("uploader") or data_json.get("channel"),
                 "videoCount": len(entries),
+                "thumbnail": cover_thumbnail,
                 "entries": [{"title": e.get("title"), "id": e.get("id")} for e in entries[:10]],
             })
 
