@@ -12,21 +12,23 @@ import json
 import glob
 from urllib.parse import urlparse
 
-from flask import Flask, request, jsonify, send_file, abort
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
-from config import FLASK_HOST, FLASK_PORT, DOWNLOAD_DIR
+from config import FLASK_HOST, FLASK_PORT, DOWNLOAD_DIR, HISTORY_FILE
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_PATH = os.path.join(BASE_DIR, DOWNLOAD_DIR)
+HISTORY_PATH = os.path.join(BASE_DIR, HISTORY_FILE)
 os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 
 app = Flask(__name__, static_folder=os.path.join(BASE_DIR, "public"), static_url_path="")
 CORS(app)
 
-# jobId -> { done, error, progress, file_path }
+# jobId -> { done, error, progress, file_path, mode, title }
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+HISTORY_LOCK = threading.Lock()
 
 
 # ---------- helpers ----------
@@ -40,7 +42,9 @@ def is_valid_youtube_url(url: str) -> bool:
         return False
 
 
-def format_selector_for(quality: str) -> str:
+def format_selector_for(mode: str, quality: str) -> str:
+    if mode == "audio":
+        return "bestaudio[ext=m4a]/bestaudio/best"
     if quality == "auto":
         return "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
     h = int(quality)
@@ -71,6 +75,41 @@ def cleanup_loop():
     while True:
         time.sleep(900)
         cleanup_old_files()
+
+
+def append_history(title, mode, quality, status):
+    """Append a download record to the history file (JSON lines)."""
+    entry = {
+        "title": title or "Untitled",
+        "mode": mode,
+        "quality": quality,
+        "status": status,
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    with HISTORY_LOCK:
+        try:
+            history = []
+            if os.path.exists(HISTORY_PATH):
+                with open(HISTORY_PATH, "r", encoding="utf-8") as fh:
+                    history = json.load(fh)
+            history.append(entry)
+            history = history[-200:]  # keep last 200 entries
+            with open(HISTORY_PATH, "w", encoding="utf-8") as fh:
+                json.dump(history, fh, indent=2)
+        except Exception:
+            pass
+
+
+def read_history(limit=50):
+    with HISTORY_LOCK:
+        try:
+            if not os.path.exists(HISTORY_PATH):
+                return []
+            with open(HISTORY_PATH, "r", encoding="utf-8") as fh:
+                history = json.load(fh)
+            return list(reversed(history))[:limit]
+        except Exception:
+            return []
 
 
 # ---------- routes ----------
@@ -129,30 +168,45 @@ def download():
     data = request.get_json(silent=True) or {}
     url = data.get("url", "").strip()
     quality = data.get("quality", "auto")
+    mode = data.get("mode", "video")  # "video" or "audio"
+    title = data.get("title", "")
 
     if not url or not is_valid_youtube_url(url):
         return jsonify({"error": "Valid YouTube URL required"}), 400
     if quality not in ("auto", "1080", "720", "480", "360"):
         quality = "auto"
+    if mode not in ("video", "audio"):
+        mode = "video"
 
     job_id = uuid.uuid4().hex[:16]
     output_template = os.path.join(DOWNLOAD_PATH, f"{job_id}.%(ext)s")
 
     with JOBS_LOCK:
-        JOBS[job_id] = {"done": False, "error": None, "progress": 0, "file_path": None}
+        JOBS[job_id] = {
+            "done": False, "error": None, "progress": 0,
+            "file_path": None, "mode": mode, "title": title,
+        }
 
     def run_download():
         args = [
             "yt-dlp",
             "--no-playlist", "--no-warnings",
-            "-f", format_selector_for(quality),
-            "--merge-output-format", "mp4",
+            "-f", format_selector_for(mode, quality),
             "-o", output_template,
-            url,
         ]
+        if mode == "audio":
+            args += ["--extract-audio", "--audio-format", "mp3"]
+        else:
+            args += ["--merge-output-format", "mp4"]
+        args.append(url)
+
+        label = f"[{mode.upper()}] {title or url}"
+        print(f"\n  >>> Download started: {label}")
+
         try:
             proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, bufsize=1)
+            last_printed = -1
             for line in proc.stdout:
                 with JOBS_LOCK:
                     job = JOBS.get(job_id)
@@ -164,9 +218,14 @@ def download():
                         pct = float(pct_str)
                         with JOBS_LOCK:
                             job["progress"] = pct
+                        # live terminal status, throttled to whole percent steps
+                        if int(pct) != last_printed:
+                            last_printed = int(pct)
+                            print(f"\r  >>> {label} — {int(pct)}%", end="", flush=True)
                     except (ValueError, IndexError):
                         pass
             proc.wait()
+            print()  # newline after progress line
 
             with JOBS_LOCK:
                 job = JOBS.get(job_id)
@@ -175,6 +234,8 @@ def download():
                 if proc.returncode != 0:
                     job["error"] = "Download failed. The video may be restricted or unavailable."
                     job["done"] = True
+                    print(f"  >>> Failed: {label}")
+                    append_history(title, mode, quality, "failed")
                     return
 
             matches = glob.glob(os.path.join(DOWNLOAD_PATH, f"{job_id}.*"))
@@ -182,12 +243,16 @@ def download():
                 with JOBS_LOCK:
                     job["error"] = "Download completed but file was not found."
                     job["done"] = True
+                print(f"  >>> Failed (file not found): {label}")
+                append_history(title, mode, quality, "failed")
                 return
 
             with JOBS_LOCK:
                 job["file_path"] = matches[0]
                 job["progress"] = 100
                 job["done"] = True
+            print(f"  >>> Done: {label}")
+            append_history(title, mode, quality, "done")
 
         except Exception as e:
             with JOBS_LOCK:
@@ -195,6 +260,8 @@ def download():
                 if job:
                     job["error"] = f"Download failed: {e}"
                     job["done"] = True
+            print(f"  >>> Error: {label} — {e}")
+            append_history(title, mode, quality, "failed")
 
     threading.Thread(target=run_download, daemon=True).start()
     return jsonify({"jobId": job_id})
@@ -214,6 +281,11 @@ def progress(job_id):
         })
 
 
+@app.route("/api/history")
+def history():
+    return jsonify({"history": read_history()})
+
+
 @app.route("/api/file/<job_id>")
 def get_file(job_id):
     with JOBS_LOCK:
@@ -221,11 +293,13 @@ def get_file(job_id):
         if not job or not job["done"] or job["error"] or not job["file_path"]:
             return jsonify({"error": "File not ready"}), 404
         file_path = job["file_path"]
+        mode = job["mode"]
 
     if not os.path.exists(file_path):
         return jsonify({"error": "File not found"}), 404
 
-    response = send_file(file_path, as_attachment=True, download_name="video.mp4")
+    download_name = "audio.mp3" if mode == "audio" else "video.mp4"
+    response = send_file(file_path, as_attachment=True, download_name=download_name)
 
     @response.call_on_close
     def cleanup():

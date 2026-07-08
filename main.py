@@ -6,13 +6,14 @@
 import os
 import sys
 import time
+import json
 import socket
 import signal
 import subprocess
 
 from banner import show_banner
 from utils import R, G, Y, C, O, W, BLD, DIM, RST, clear_screen
-from config import FLASK_HOST, FLASK_PORT
+from config import FLASK_HOST, FLASK_PORT, HISTORY_FILE
 from setup import ensure_all_dependencies
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -105,6 +106,43 @@ def stop_tools(pause=True):
         input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
 
 
+def show_history():
+    history_path = os.path.join(BASE_DIR, HISTORY_FILE)
+    print()
+    if not os.path.exists(history_path):
+        print(f"  {Y}No downloads yet.{RST}")
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
+        return
+
+    try:
+        with open(history_path, "r", encoding="utf-8") as fh:
+            history = json.load(fh)
+    except Exception:
+        print(f"  {R}Could not read history file.{RST}")
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
+        return
+
+    if not history:
+        print(f"  {Y}No downloads yet.{RST}")
+        input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
+        return
+
+    print(f"  {Y}{BLD}Recent downloads (latest first){RST}\n")
+    for entry in reversed(history[-25:]):
+        status_color = G if entry.get("status") == "done" else R
+        status_text = "OK" if entry.get("status") == "done" else "FAILED"
+        mode = entry.get("mode", "video").upper()
+        quality = entry.get("quality", "auto")
+        title = entry.get("title") or "Untitled"
+        if len(title) > 40:
+            title = title[:37] + "..."
+        when = entry.get("time", "")
+        print(f"  {status_color}[{status_text}]{RST} {DIM}{when}{RST}  {C}{mode}{RST}/{quality}  {W}{title}{RST}")
+
+    print()
+    input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
+
+
 def exit_app():
     stop_tools(pause=False)
     print(f"  {O}{BLD}Bye - CODEX-M41NUL{RST}\n")
@@ -123,6 +161,7 @@ def show_menu():
     print()
     print(f"  {Y}{BLD}[1]{RST} {W}Start YT Downloader")
     print(f"  {Y}{BLD}[2]{RST} {W}Stop")
+    print(f"  {Y}{BLD}[3]{RST} {W}History")
     print(f"  {Y}{BLD}[0]{RST} {W}Exit")
     print()
 
@@ -147,10 +186,12 @@ def main():
             start_tools()
         elif choice == "2":
             stop_tools()
+        elif choice == "3":
+            show_history()
         elif choice == "0":
             exit_app()
         else:
-            print(f"\n  {R}Invalid option. Choose 1, 2, or 0.{RST}")
+            print(f"\n  {R}Invalid option. Choose 1, 2, 3, or 0.{RST}")
             input(f"  {DIM}{W}Press Enter to continue...{RST}")
 
 

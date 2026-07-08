@@ -272,6 +272,36 @@
     letter-spacing:0.06em;
     margin-bottom:10px;
   }
+  .mode-toggle{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:7px;
+    margin-bottom:16px;
+  }
+  .mode-opt{
+    border:1px solid var(--line);
+    background: var(--ink);
+    color: var(--text-dim);
+    border-radius:9px;
+    padding:11px 4px;
+    text-align:center;
+    cursor:pointer;
+    font-family:'Space Grotesk', sans-serif;
+    font-size:13px;
+    font-weight:600;
+    transition: all 0.12s ease;
+  }
+  .mode-opt.active{
+    border-color: var(--signal);
+    background: var(--signal-dim);
+    color: var(--signal);
+  }
+  .quality-zone{
+    transition: opacity 0.15s ease;
+  }
+  .quality-zone.hidden{
+    display:none;
+  }
   .quality-grid{
     display:grid;
     grid-template-columns: repeat(5, 1fr);
@@ -422,13 +452,21 @@
       </div>
     </div>
 
-    <div class="section-label">quality</div>
-    <div class="quality-grid" id="qualityGrid">
-      <div class="q-opt active" data-q="auto"><span class="q-label">Auto</span><span class="q-sub">best</span></div>
-      <div class="q-opt" data-q="1080"><span class="q-label">1080</span><span class="q-sub">p</span></div>
-      <div class="q-opt" data-q="720"><span class="q-label">720</span><span class="q-sub">p</span></div>
-      <div class="q-opt" data-q="480"><span class="q-label">480</span><span class="q-sub">p</span></div>
-      <div class="q-opt" data-q="360"><span class="q-label">360</span><span class="q-sub">p</span></div>
+    <div class="section-label">format</div>
+    <div class="mode-toggle" id="modeToggle">
+      <div class="mode-opt active" data-mode="video">Video (MP4)</div>
+      <div class="mode-opt" data-mode="audio">Audio (MP3)</div>
+    </div>
+
+    <div class="quality-zone" id="qualityZone">
+      <div class="section-label">quality</div>
+      <div class="quality-grid" id="qualityGrid">
+        <div class="q-opt active" data-q="auto"><span class="q-label">Auto</span><span class="q-sub">best</span></div>
+        <div class="q-opt" data-q="1080"><span class="q-label">1080</span><span class="q-sub">p</span></div>
+        <div class="q-opt" data-q="720"><span class="q-label">720</span><span class="q-sub">p</span></div>
+        <div class="q-opt" data-q="480"><span class="q-label">480</span><span class="q-sub">p</span></div>
+        <div class="q-opt" data-q="360"><span class="q-label">360</span><span class="q-sub">p</span></div>
+      </div>
     </div>
 
     <button class="btn btn-primary btn-full" id="downloadBtn">Download</button>
@@ -454,6 +492,8 @@
   const videoTitle = document.getElementById('videoTitle');
   const videoUploader = document.getElementById('videoUploader');
   const qualityGrid = document.getElementById('qualityGrid');
+  const modeToggle = document.getElementById('modeToggle');
+  const qualityZone = document.getElementById('qualityZone');
   const downloadBtn = document.getElementById('downloadBtn');
   const progressZone = document.getElementById('progressZone');
   const progressFill = document.getElementById('progressFill');
@@ -462,8 +502,20 @@
   const statusMsg = document.getElementById('statusMsg');
 
   let selectedQuality = 'auto';
+  let selectedMode = 'video';
   let currentUrl = '';
+  let currentTitle = '';
   let pollTimer = null;
+
+  modeToggle.addEventListener('click', (e) => {
+    const opt = e.target.closest('.mode-opt');
+    if (!opt) return;
+    document.querySelectorAll('.mode-opt').forEach(o => o.classList.remove('active'));
+    opt.classList.add('active');
+    selectedMode = opt.dataset.mode;
+    qualityZone.classList.toggle('hidden', selectedMode === 'audio');
+    downloadBtn.textContent = selectedMode === 'audio' ? 'Download Audio' : 'Download';
+  });
 
   qualityGrid.addEventListener('click', (e) => {
     const opt = e.target.closest('.q-opt');
@@ -513,6 +565,7 @@
       if (!res.ok) throw new Error(data.error || 'Could not fetch info');
 
       currentUrl = url;
+      currentTitle = data.title || '';
       videoTitle.textContent = data.title || 'Untitled';
       videoUploader.textContent = data.uploader || '';
       durationTag.textContent = data.duration || '';
@@ -553,7 +606,7 @@
       const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: currentUrl, quality: selectedQuality })
+        body: JSON.stringify({ url: currentUrl, quality: selectedQuality, mode: selectedMode, title: currentTitle })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not start download');
