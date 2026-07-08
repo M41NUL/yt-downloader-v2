@@ -4,27 +4,54 @@
 # ─────────────────────────────────────────
 
 import os
-import re
 import sys
 import time
+import socket
 import signal
 import subprocess
 
 from banner import show_banner
 from utils import R, G, Y, C, O, W, BLD, DIM, RST, clear_screen
 from config import FLASK_HOST, FLASK_PORT
+from setup import ensure_all_dependencies
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 flask_proc = None
-tunnel_proc = None
-public_url = None
+local_url = None
+
+
+# ---------- helpers ----------
+
+def get_lan_ip():
+    """Best-effort LAN IP detection (works on Termux without extra packages)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
+
+
+def box_line(text, width, color=W):
+    """Pad a line to fit inside a fixed-width box, truncating if too long."""
+    if len(text) > width - 2:
+        text = text[: width - 5] + "..."
+    pad = width - 2 - len(text)
+    return f"  {O}{BLD}|{RST} {color}{text}{RST}{' ' * max(pad - 1, 0)}{O}{BLD}|{RST}"
+
+
+def box_border(width, corner_l="+", corner_r="+"):
+    return f"  {O}{BLD}{corner_l}{'-' * width}{corner_r}{RST}"
 
 
 # ---------- process control ----------
 
 def start_tools():
-    global flask_proc, tunnel_proc, public_url
+    global flask_proc, local_url
 
     if flask_proc is not None:
         print(f"\n  {Y}Already running.{RST}\n")
@@ -43,66 +70,19 @@ def start_tools():
         flask_proc = None
         return
 
-    print(f"  {G}Flask backend running on http://{FLASK_HOST}:{FLASK_PORT}{RST}")
-    print(f"  {C}Opening tunnel (cloudflared)...{RST}")
+    lan_ip = get_lan_ip()
+    local_url = f"http://{lan_ip}:{FLASK_PORT}"
 
-    try:
-        tunnel_proc = subprocess.Popen(
-            ["cloudflared", "tunnel", "--url", f"http://{FLASK_HOST}:{FLASK_PORT}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-    except FileNotFoundError:
-        print(f"  {R}cloudflared not found. Install it: pkg install cloudflared{RST}\n")
-        stop_tools()
-        return
-
-    print(f"  {DIM}{W}waiting for public link...{RST}")
-    url_pattern = re.compile(r"https://[a-zA-Z0-9\-]+\.trycloudflare\.com")
-    deadline = time.time() + 25
-    found = False
-
-    while time.time() < deadline:
-        line = tunnel_proc.stdout.readline()
-        if not line:
-            if tunnel_proc.poll() is not None:
-                break
-            continue
-        match = url_pattern.search(line)
-        if match:
-            public_url = match.group(0)
-            found = True
-            break
-
-    if found:
-        print(f"\n  {O}{BLD}+{'─'*54}+{RST}")
-        print(f"  {O}{BLD}|{RST}  {Y}{BLD}YOUR LINK IS READY{RST}{' '*35}{O}{BLD}|{RST}")
-        print(f"  {O}{BLD}|{RST}  {G}{public_url}{RST}{' '*max(54-len(public_url)-2,0)}{O}{BLD}|{RST}")
-        print(f"  {O}{BLD}+{'─'*54}+{RST}")
-        print(f"\n  {DIM}{W}Open that link in any browser to use the downloader.{RST}\n")
-    else:
-        print(f"\n  {R}Could not detect the public link in time.{RST}")
-        print(f"  {DIM}{W}The tunnel may still be starting — check manually or restart.{RST}\n")
+    width = 56
+    print(f"\n{box_border(width)}")
+    print(box_line("YOUR LINK IS READY", width, f"{Y}{BLD}"))
+    print(box_line(local_url, width, f"{G}{BLD}"))
+    print(box_border(width))
+    print(f"\n  {DIM}{W}Open that link on any device connected to the SAME WiFi.{RST}\n")
 
 
 def stop_tools():
-    global flask_proc, tunnel_proc, public_url
-
-    stopped_any = False
-
-    if tunnel_proc is not None:
-        try:
-            tunnel_proc.terminate()
-            tunnel_proc.wait(timeout=5)
-        except Exception:
-            try:
-                tunnel_proc.kill()
-            except Exception:
-                pass
-        tunnel_proc = None
-        stopped_any = True
+    global flask_proc, local_url
 
     if flask_proc is not None:
         try:
@@ -114,29 +94,25 @@ def stop_tools():
             except Exception:
                 pass
         flask_proc = None
-        stopped_any = True
-
-    public_url = None
-
-    if stopped_any:
-        print(f"\n  {G}Stopped. Server and tunnel closed.{RST}\n")
+        local_url = None
+        print(f"\n  {G}Stopped. Server closed.{RST}\n")
     else:
         print(f"\n  {Y}Nothing is running.{RST}\n")
 
 
 def exit_app():
     stop_tools()
-    print(f"  {O}{BLD}Bye — CODEX-M41NUL{RST}\n")
+    print(f"  {O}{BLD}Bye - CODEX-M41NUL{RST}\n")
     sys.exit(0)
 
 
 # ---------- menu ----------
 
 def show_menu():
-    status = f"{G}● RUNNING{RST}" if flask_proc is not None else f"{DIM}{W}○ STOPPED{RST}"
+    status = f"{G}RUNNING{RST}" if flask_proc is not None else f"{DIM}{W}STOPPED{RST}"
     print(f"  {W}Status: {status}")
-    if public_url:
-        print(f"  {W}Link:   {C}{public_url}{RST}")
+    if local_url:
+        print(f"  {W}Link:   {C}{local_url}{RST}")
     print()
     print(f"  {Y}{BLD}[1]{RST} {W}Start YT Downloader")
     print(f"  {Y}{BLD}[2]{RST} {W}Stop")
@@ -147,6 +123,7 @@ def show_menu():
 def main():
     clear_screen()
     show_banner()
+    ensure_all_dependencies()
 
     def handle_sigint(sig, frame):
         print()
@@ -156,7 +133,7 @@ def main():
 
     while True:
         show_menu()
-        choice = input(f"  {O}{BLD}➜ {RST}").strip()
+        choice = input(f"  {O}{BLD}> {RST}").strip()
 
         if choice == "1":
             start_tools()

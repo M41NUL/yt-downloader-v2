@@ -19,6 +19,6 @@ DEV_EMAIL    = "your@email.com"
 COPYRIGHT    = "(c) CODEX-M41NUL — All Rights Reserved"
 
 # ---- runtime ----
-FLASK_HOST   = "127.0.0.1"
+FLASK_HOST   = "0.0.0.0"
 FLASK_PORT   = 3000
 DOWNLOAD_DIR = "downloads"

@@ -1,29 +1,22 @@
 # YT DOWNLOADER (Termux — Python)
 
-Banner + menu-driven runner. Backend is Flask + yt-dlp. Frontend is served by Flask itself.
+Banner + menu-driven runner. Backend is Flask + yt-dlp. Frontend is served by Flask itself. Runs over your local WiFi network (LAN IP) — no internet tunnel needed.
 
-## 1. Install requirements (one-time, in Termux)
+## 1. One-time requirement (only this needs manual install)
 
 ```bash
 pkg update && pkg upgrade -y
-pkg install python ffmpeg -y
-pip install -U yt-dlp
-pip install flask flask-cors --break-system-packages
-pkg install cloudflared -y
+pkg install python -y
 ```
 
-Check:
-```bash
-python -V
-yt-dlp --version
-cloudflared --version
-```
+That's it. Everything else (`ffmpeg`, `yt-dlp`, `flask`, `flask-cors`) is **checked and auto-installed automatically** every time you run the tool — already-installed packages are skipped, missing ones get installed on the spot.
 
 ## 2. Project files
 
 ```
 ytdl-tool-v2/
 ├── main.py           ← run this
+├── setup.py          ← auto dependency checker/installer
 ├── banner.py         ← banner + info box
 ├── config.py         ← dev/tool info, edit your links here
 ├── utils.py          ← colors
@@ -45,7 +38,10 @@ cd ytdl-tool-v2
 python main.py
 ```
 
-This shows the banner + info box, then a menu:
+This shows:
+1. The banner + info box
+2. A dependency check (`[ok]` for installed, `[missing]` → auto-installs it)
+3. The menu:
 
 ```
 [1] Start YT Downloader
@@ -53,16 +49,17 @@ This shows the banner + info box, then a menu:
 [0] Exit
 ```
 
-- **1** → starts Flask (background) + opens a cloudflared tunnel, then prints your public link right in the terminal.
-- **2** → stops both Flask and the tunnel, back to the menu.
+- **1** → starts Flask in the background and prints your LAN link (e.g. `http://192.168.1.42:3000`).
+- **2** → stops the server, back to the menu.
 - **0** → stops everything and exits.
 
-Open the printed link in any browser — that's your full frontend + backend, ready to paste a YouTube URL and download.
+Open the printed link in any browser **on a device connected to the same WiFi** — that's your full frontend + backend, ready to paste a YouTube URL and download.
 
 ## Notes
 
+- This only works on the same WiFi network. To let devices outside your network use it, you'd need a tunnel service (cloudflared/ngrok) instead — ask if you want that added back.
 - Edit `config.py` to put in your real Telegram/GitHub/YouTube/WhatsApp/Email links — that's what shows in the banner's info box.
 - Default quality is **Auto** (best available, merged to mp4). 1080/720/480/360 also selectable in the UI.
-- Cloudflared's quick-tunnel link changes every time you press **Start** again — that's expected with the free quick-tunnel mode.
 - Files are deleted right after being sent, plus hourly cleanup for anything left behind in `downloads/`.
-- If some videos fail to download, run `pip install -U yt-dlp --break-system-packages` — YouTube changes often and yt-dlp updates to match.
+- yt-dlp updates itself automatically only when missing — if downloads start failing due to YouTube changes, run `pip install -U yt-dlp --break-system-packages` manually to force an update.
+- If your phone's IP changes (e.g. reconnecting to WiFi), just restart (Stop then Start) to get the new link.
