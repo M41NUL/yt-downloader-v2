@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import importlib.util
 
-from utils import R, G, Y, C, W, DIM, BLD, RST
+from utils import R, G, Y, C, W, DIM, BLD, RST, Spinner
 
 # (pkg_name_for_termux, check_type, check_value)
 # check_type: "bin" -> checked via shutil.which
@@ -39,28 +39,29 @@ def _check_py(module_name):
 
 
 def _run(cmd, label, is_pkg=False):
-    print(f"  {C}Installing {label}...{RST}")
+    spinner = Spinner(f"Installing {label}...").start()
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if result.returncode != 0:
             # Retry once after refreshing package lists (common cause: stale/broken mirror)
             if is_pkg:
-                print(f"  {DIM}{W}Install failed, refreshing package list and retrying...{RST}")
+                spinner.stop()
+                spinner = Spinner(f"Install failed, refreshing package list and retrying...").start()
                 subprocess.run(["pkg", "update", "-y"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
             if result.returncode != 0:
-                print(f"  {R}Failed to install {label}.{RST}")
+                spinner.stop(f"Failed to install {label}.", success=False)
                 print(f"  {DIM}{W}{result.stdout[-400:]}{RST}")
                 if is_pkg:
                     print(f"  {Y}Tip: your Termux mirror may be broken. Try:{RST}")
                     print(f"  {DIM}{W}  termux-change-repo{RST}")
                     print(f"  {DIM}{W}then pick a different mirror and run this again.{RST}")
                 return False
-        print(f"  {G}{label} installed.{RST}")
+        spinner.stop(f"{label} installed.")
         return True
     except FileNotFoundError:
-        print(f"  {R}Command not found: {cmd[0]}. Are you running this in Termux?{RST}")
+        spinner.stop(f"Command not found: {cmd[0]}. Are you running this in Termux?", success=False)
         return False
 
 
@@ -87,7 +88,7 @@ def _self_update_ytdlp():
         except OSError:
             pass
 
-    print(f"  {DIM}{W}Checking for yt-dlp updates...{RST}")
+    spinner = Spinner("Checking for yt-dlp updates...").start()
     try:
         result = subprocess.run(
             ["pip", "install", "-U", "--break-system-packages", "yt-dlp"],
@@ -95,13 +96,13 @@ def _self_update_ytdlp():
         )
         if result.returncode == 0:
             if "Successfully installed" in result.stdout:
-                print(f"  {G}yt-dlp updated to the latest version.{RST}")
+                spinner.stop("yt-dlp updated to the latest version.")
             else:
-                print(f"  {G}yt-dlp is already up to date.{RST}")
+                spinner.stop("yt-dlp is already up to date.")
         else:
-            print(f"  {Y}Could not check yt-dlp updates (offline or mirror issue) — continuing.{RST}")
+            spinner.stop("Could not check yt-dlp updates (offline or mirror issue) — continuing.", success=False)
     except Exception:
-        print(f"  {Y}Could not check yt-dlp updates — continuing.{RST}")
+        spinner.stop("Could not check yt-dlp updates — continuing.", success=False)
 
     try:
         with open(check_path, "w") as fh:

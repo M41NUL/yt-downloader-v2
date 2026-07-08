@@ -13,7 +13,7 @@ import signal
 import subprocess
 
 from banner import show_banner
-from utils import R, G, Y, C, O, W, BLD, DIM, RST, clear_screen
+from utils import R, G, Y, C, O, W, BLD, DIM, RST, clear_screen, Spinner
 from config import FLASK_HOST, FLASK_PORT, HISTORY_FILE, DOWNLOAD_DIR, VERSION
 from setup import ensure_all_dependencies
 import settings as settings_mod
@@ -63,18 +63,30 @@ def get_yt_dlp_version():
 
 
 def print_qr(url):
-    """Best-effort ASCII QR code so the link can be scanned from another device."""
+    """Best-effort ASCII QR code so the link can be scanned from another device.
+    Uses half-block characters (2 QR rows per terminal line) to keep it compact."""
     try:
         import qrcode
-        qr = qrcode.QRCode(border=1)
+        spinner = Spinner("Generating QR code...").start()
+        qr = qrcode.QRCode(border=1, box_size=1)
         qr.add_data(url)
         qr.make(fit=True)
         matrix = qr.get_matrix()
+        spinner.stop()
         print()
-        for row in matrix:
-            line = "  "
-            for cell in row:
-                line += "██" if cell else "  "
+        for y in range(0, len(matrix), 2):
+            top_row = matrix[y]
+            bottom_row = matrix[y + 1] if y + 1 < len(matrix) else [False] * len(top_row)
+            line = ""
+            for top, bottom in zip(top_row, bottom_row):
+                if top and bottom:
+                    line += "█"
+                elif top and not bottom:
+                    line += "▀"
+                elif not top and bottom:
+                    line += "▄"
+                else:
+                    line += " "
             print(f"  {W}{line}{RST}")
         print()
     except ImportError:
@@ -112,7 +124,8 @@ def start_tools():
         input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
         return
 
-    print(f"\n  {C}Starting Flask backend...{RST}")
+    print()
+    spinner = Spinner("Starting Flask backend...").start()
     flask_proc = subprocess.Popen(
         [sys.executable, os.path.join(BASE_DIR, "server.py")],
         stdout=subprocess.DEVNULL,
@@ -121,10 +134,12 @@ def start_tools():
     time.sleep(2)
 
     if flask_proc.poll() is not None:
-        print(f"  {R}Flask failed to start. Run 'python server.py' directly to see the error.{RST}")
+        spinner.stop("Flask failed to start. Run 'python server.py' directly to see the error.", success=False)
         input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
         flask_proc = None
         return
+
+    spinner.stop("Flask backend is running.")
 
     lan_ip = get_lan_ip()
     local_url = f"http://{lan_ip}:{FLASK_PORT}"
@@ -145,6 +160,7 @@ def stop_tools(pause=True):
     global flask_proc, local_url
 
     if flask_proc is not None:
+        spinner = Spinner("Stopping server...").start()
         try:
             flask_proc.terminate()
             flask_proc.wait(timeout=5)
@@ -155,7 +171,7 @@ def stop_tools(pause=True):
                 pass
         flask_proc = None
         local_url = None
-        print(f"\n  {G}Stopped. Server closed.{RST}")
+        spinner.stop("Stopped. Server closed.")
     else:
         print(f"\n  {Y}Nothing is running.{RST}")
     if pause:
@@ -191,6 +207,8 @@ def show_history():
     print(f"  {O}[5]{RST} {W}Successful only")
     choice = input(f"\n  {O}{BLD}> {RST}").strip()
 
+    spinner = Spinner("Loading history...").start()
+
     def matches(entry):
         mode = entry.get("mode", "video")
         status = entry.get("status", "done")
@@ -205,6 +223,7 @@ def show_history():
         return True
 
     filtered = [e for e in reversed(history) if matches(e)]
+    spinner.stop()
 
     print()
     if not filtered:
@@ -247,6 +266,7 @@ def clear_downloads():
         return
 
     removed, failed = 0, 0
+    spinner = Spinner(f"Removing {len(items)} item(s)...").start()
     for item in items:
         try:
             if os.path.isdir(item):
@@ -258,15 +278,19 @@ def clear_downloads():
         except OSError:
             failed += 1
 
-    print(f"  {G}Removed {removed} item(s).{RST}" + (f" {R}({failed} failed){RST}" if failed else ""))
+    if failed:
+        spinner.stop(f"Removed {removed} item(s), {failed} failed.", success=False)
+    else:
+        spinner.stop(f"Removed {removed} item(s).")
     input(f"  {DIM}{W}Press Enter to go back to menu...{RST}")
 
 
 def check_ytdlp_update():
-    print(f"\n  {C}Checking yt-dlp for updates...{RST}")
+    print()
     current = get_yt_dlp_version()
     if current:
         print(f"  {DIM}{W}Current version: {current}{RST}")
+    spinner = Spinner("Checking yt-dlp for updates...").start()
     try:
         result = subprocess.run(
             ["pip", "install", "-U", "--break-system-packages", "yt-dlp"],
@@ -275,16 +299,16 @@ def check_ytdlp_update():
         if result.returncode == 0:
             new_version = get_yt_dlp_version()
             if "Successfully installed" in result.stdout:
-                print(f"  {G}yt-dlp updated.{RST} {DIM}{W}Now on {new_version}{RST}")
+                spinner.stop(f"yt-dlp updated. Now on {new_version}")
             else:
-                print(f"  {G}yt-dlp is already up to date.{RST} {DIM}{W}({new_version}){RST}")
+                spinner.stop(f"yt-dlp is already up to date. ({new_version})")
         else:
-            print(f"  {R}Update check failed (offline or mirror issue).{RST}")
+            spinner.stop("Update check failed (offline or mirror issue).", success=False)
             print(f"  {DIM}{W}{result.stdout[-300:]}{RST}")
     except subprocess.TimeoutExpired:
-        print(f"  {R}Update check timed out.{RST}")
+        spinner.stop("Update check timed out.", success=False)
     except Exception as e:
-        print(f"  {R}Update check failed: {e}{RST}")
+        spinner.stop(f"Update check failed: {e}", success=False)
     input(f"\n  {DIM}{W}Press Enter to go back to menu...{RST}")
 
 
@@ -351,13 +375,14 @@ def show_menu():
     clear_screen()
     show_banner()
     status = f"{G}RUNNING{RST}" if flask_proc is not None else f"{DIM}{W}STOPPED{RST}"
-    print(f"  {W}Status: {status}")
+    ytdlp_version = get_yt_dlp_version()
+    status_line = f"  {W}Status: {status}"
+    if ytdlp_version:
+        status_line += f"  {DIM}{W}|{RST}  {DIM}{W}yt-dlp {ytdlp_version}{RST}"
+    print(status_line)
+
     if local_url:
         print(f"  {W}Link:   {C}{local_url}{RST}")
-
-    ytdlp_version = get_yt_dlp_version()
-    if ytdlp_version:
-        print(f"  {DIM}{W}yt-dlp {ytdlp_version}{RST}")
 
     if flask_proc is not None:
         stats = get_live_stats()
@@ -370,7 +395,7 @@ def show_menu():
 
     leftover = count_downloads_left()
     if leftover > 0:
-        print(f"  {DIM}{W}Files pending cleanup: {leftover}{RST}")
+        print(f"\n  {Y}Files pending cleanup: {leftover}{RST}")
 
     print()
     print(f"  {Y}{BLD}[1]{RST} {W}Start YT Downloader")
