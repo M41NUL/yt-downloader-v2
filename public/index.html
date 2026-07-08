@@ -662,10 +662,16 @@ function renderPlaylist(data) {
   const count = data.videoCount || (data.entries ? data.entries.length : 0);
   infoUploader.textContent = data.uploader || 'Unknown uploader';
 
-  thumbImg.style.display = 'none';
   thumbDuration.style.display = 'none';
   thumbPlaylistBadge.style.display = 'flex';
   playlistCountText.textContent = count + (count === 1 ? ' video' : ' videos');
+
+  if (data.thumbnail) {
+    thumbImg.src = data.thumbnail;
+    thumbImg.style.display = '';
+  } else {
+    thumbImg.style.display = 'none';
+  }
 
   const entries = data.entries || [];
   playlistList.innerHTML = '';
