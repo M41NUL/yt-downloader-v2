@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Pull — YouTube Downloader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0b1220;
+    --ink-2:#0f1830;
+    --ink-3:#141f3d;
+    --line: rgba(255,255,255,0.08);
+    --line-2: rgba(255,255,255,0.14);
+    --text: #e9ecf4;
+    --text-dim: #8792ab;
+    --signal: #f2c245;
+    --signal-dim: rgba(242,194,69,0.14);
+    --good: #57caa0;
+    --bad: #e2665f;
+    --radius: 14px;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background: var(--ink);
+    color: var(--text);
+    font-family:'Space Grotesk', sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background:
+      radial-gradient(600px 300px at 15% -5%, rgba(242,194,69,0.07), transparent 60%),
+      radial-gradient(500px 400px at 100% 10%, rgba(87,202,160,0.05), transparent 60%);
+    pointer-events:none;
+    z-index:0;
+  }
+  .mono{ font-family:'JetBrains Mono', monospace; }
+
+  .wrap{
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    position:relative;
+    z-index:1;
+  }
+
+  /* header */
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom: 34px;
+  }
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .brand-mark{
+    width:30px; height:30px;
+    border-radius:8px;
+    background: linear-gradient(155deg, var(--signal), #d9a72f);
+    position:relative;
+    flex-shrink:0;
+  }
+  .brand-mark::after{
+    content:"";
+    position:absolute;
+    left:50%; top:50%;
+    width:0; height:0;
+    transform:translate(-45%,-50%);
+    border-style:solid;
+    border-width:6px 0 6px 9px;
+    border-color:transparent transparent transparent #14120a;
+  }
+  .brand-name{
+    font-weight:700;
+    font-size:17px;
+    letter-spacing:-0.02em;
+  }
+  .brand-sub{
+    font-size:10.5px;
+    color: var(--text-dim);
+    font-family:'JetBrains Mono', monospace;
+    letter-spacing:0.04em;
+  }
+  .status-pill{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color: var(--text-dim);
+    border:1px solid var(--line);
+    padding:5px 10px 5px 8px;
+    border-radius:100px;
+  }
+  .dot{
+    width:6px; height:6px;
+    border-radius:50%;
+    background: var(--good);
+    box-shadow: 0 0 8px var(--good);
+  }
+
+  /* hero */
+  .hero{
+    margin-bottom: 28px;
+  }
+  .eyebrow{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color: var(--signal);
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    margin-bottom:10px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .eyebrow::before{
+    content:"";
+    width:16px; height:1px;
+    background: var(--signal);
+    opacity:0.6;
+  }
+  h1{
+    font-size: 30px;
+    line-height:1.15;
+    letter-spacing:-0.02em;
+    margin:0 0 10px;
+    font-weight:700;
+  }
+  h1 span{ color: var(--text-dim); font-weight:500; }
+  .hero p{
+    color: var(--text-dim);
+    font-size:14.5px;
+    line-height:1.55;
+    margin:0;
+    max-width: 46ch;
+  }
+
+  /* input card */
+  .panel{
+    background: var(--ink-2);
+    border:1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom:16px;
+  }
+  .url-row{
+    display:flex;
+    gap:8px;
+  }
+  .url-input-wrap{
+    position:relative;
+    flex:1;
+  }
+  .url-input-wrap svg{
+    position:absolute;
+    left:13px; top:50%;
+    transform:translateY(-50%);
+    opacity:0.4;
+    pointer-events:none;
+  }
+  input[type="text"]{
+    width:100%;
+    background: var(--ink);
+    border:1px solid var(--line);
+    color: var(--text);
+    font-family:'JetBrains Mono', monospace;
+    font-size:13.5px;
+    padding: 13px 14px 13px 38px;
+    border-radius:10px;
+    outline:none;
+    transition: border-color 0.15s ease;
+  }
+  input[type="text"]::placeholder{ color:#4a5470; }
+  input[type="text"]:focus{ border-color: var(--signal-dim); border-color: rgba(242,194,69,0.5); }
+
+  .btn{
+    border:none;
+    border-radius:10px;
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:600;
+    font-size:14px;
+    cursor:pointer;
+    padding: 0 20px;
+    transition: transform 0.1s ease, opacity 0.15s ease;
+  }
+  .btn:active{ transform: scale(0.97); }
+  .btn:disabled{ opacity:0.4; cursor:not-allowed; }
+  .btn-primary{
+    background: var(--signal);
+    color:#1a1506;
+  }
+  .btn-full{ width:100%; padding:14px; margin-top:14px; }
+
+  .hint{
+    font-size:11.5px;
+    color:#4a5470;
+    margin-top:9px;
+    font-family:'JetBrains Mono', monospace;
+  }
+
+  /* video info card */
+  .video-card{
+    display:none;
+  }
+  .video-card.show{ display:block; }
+  .video-media{
+    display:flex;
+    gap:12px;
+    margin-bottom:16px;
+  }
+  .thumb-wrap{
+    width:120px;
+    height:68px;
+    border-radius:8px;
+    overflow:hidden;
+    flex-shrink:0;
+    background: var(--ink-3);
+    position:relative;
+  }
+  .thumb-wrap img{
+    width:100%; height:100%;
+    object-fit:cover;
+    display:block;
+  }
+  .duration-tag{
+    position:absolute;
+    bottom:4px; right:4px;
+    background:rgba(0,0,0,0.75);
+    font-family:'JetBrains Mono', monospace;
+    font-size:10px;
+    padding:2px 5px;
+    border-radius:4px;
+  }
+  .video-meta{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    min-width:0;
+  }
+  .video-title{
+    font-size:14.5px;
+    font-weight:600;
+    line-height:1.3;
+    margin:0 0 4px;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+  .video-uploader{
+    font-size:12px;
+    color: var(--text-dim);
+    margin:0;
+  }
+
+  /* quality selector */
+  .section-label{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color:var(--text-dim);
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    margin-bottom:10px;
+  }
+  .quality-grid{
+    display:grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap:7px;
+    margin-bottom: 4px;
+  }
+  .q-opt{
+    border:1px solid var(--line);
+    background: var(--ink);
+    color: var(--text-dim);
+    border-radius:9px;
+    padding:10px 4px;
+    text-align:center;
+    cursor:pointer;
+    font-family:'JetBrains Mono', monospace;
+    font-size:12px;
+    font-weight:500;
+    transition: all 0.12s ease;
+    position:relative;
+  }
+  .q-opt.disabled{
+    opacity:0.3;
+    cursor:not-allowed;
+  }
+  .q-opt.active{
+    border-color: var(--signal);
+    background: var(--signal-dim);
+    color: var(--signal);
+  }
+  .q-opt .q-label{ display:block; }
+  .q-opt .q-sub{ font-size:9px; opacity:0.7; }
+
+  /* progress */
+  .progress-zone{
+    display:none;
+    margin-top:16px;
+  }
+  .progress-zone.show{ display:block; }
+  .progress-track{
+    height:6px;
+    background: var(--ink);
+    border:1px solid var(--line);
+    border-radius:100px;
+    overflow:hidden;
+    margin-bottom:8px;
+  }
+  .progress-fill{
+    height:100%;
+    width:0%;
+    background: linear-gradient(90deg, var(--signal), #d9a72f);
+    border-radius:100px;
+    transition: width 0.3s ease;
+  }
+  .progress-fill.indeterminate{
+    width:30%;
+    animation: slide 1.3s ease-in-out infinite;
+  }
+  @keyframes slide{
+    0%{ margin-left:-30%; }
+    50%{ margin-left:70%; }
+    100%{ margin-left:-30%; }
+  }
+  .progress-label{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11.5px;
+    color: var(--text-dim);
+    display:flex;
+    justify-content:space-between;
+  }
+
+  .status-msg{
+    font-size:13px;
+    padding:11px 13px;
+    border-radius:9px;
+    margin-top:14px;
+    display:none;
+    font-family:'JetBrains Mono', monospace;
+    line-height:1.5;
+  }
+  .status-msg.show{ display:block; }
+  .status-msg.error{
+    background: rgba(226,102,95,0.1);
+    border:1px solid rgba(226,102,95,0.3);
+    color:#f0a19c;
+  }
+  .status-msg.success{
+    background: rgba(87,202,160,0.1);
+    border:1px solid rgba(87,202,160,0.3);
+    color: var(--good);
+  }
+
+  footer{
+    text-align:center;
+    margin-top:40px;
+    color:#3a4362;
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    letter-spacing:0.03em;
+  }
+
+  @media (max-width: 400px){
+    h1{ font-size:26px; }
+    .quality-grid{ gap:5px; }
+    .q-opt{ font-size:11px; padding:9px 2px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <div class="brand-name">Pull</div>
+        <div class="brand-sub">YT / LOCAL SERVER</div>
+      </div>
+    </div>
+    <div class="status-pill"><span class="dot"></span>online</div>
+  </header>
+
+  <div class="hero">
+    <div class="eyebrow">paste · decode · save</div>
+    <h1>Grab any YouTube<br><span>video, straight to your device.</span></h1>
+    <p>Drop a link below. Pull reads the stream, picks the sharpest quality available, and hands you back a clean file.</p>
+  </div>
+
+  <div class="panel">
+    <div class="url-row">
+      <div class="url-input-wrap">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <input type="text" id="urlInput" placeholder="https://youtube.com/watch?v=..." autocomplete="off">
+      </div>
+      <button class="btn btn-primary" id="fetchBtn">Fetch</button>
+    </div>
+    <div class="hint" id="hintText">works with youtube.com and youtu.be links</div>
+  </div>
+
+  <div class="panel video-card" id="videoCard">
+    <div class="video-media">
+      <div class="thumb-wrap">
+        <img id="thumbImg" src="" alt="">
+        <span class="duration-tag" id="durationTag"></span>
+      </div>
+      <div class="video-meta">
+        <p class="video-title" id="videoTitle"></p>
+        <p class="video-uploader" id="videoUploader"></p>
+      </div>
+    </div>
+
+    <div class="section-label">quality</div>
+    <div class="quality-grid" id="qualityGrid">
+      <div class="q-opt active" data-q="auto"><span class="q-label">Auto</span><span class="q-sub">best</span></div>
+      <div class="q-opt" data-q="1080"><span class="q-label">1080</span><span class="q-sub">p</span></div>
+      <div class="q-opt" data-q="720"><span class="q-label">720</span><span class="q-sub">p</span></div>
+      <div class="q-opt" data-q="480"><span class="q-label">480</span><span class="q-sub">p</span></div>
+      <div class="q-opt" data-q="360"><span class="q-label">360</span><span class="q-sub">p</span></div>
+    </div>
+
+    <button class="btn btn-primary btn-full" id="downloadBtn">Download</button>
+
+    <div class="progress-zone" id="progressZone">
+      <div class="progress-track"><div class="progress-fill indeterminate" id="progressFill"></div></div>
+      <div class="progress-label"><span id="progressStage">preparing</span><span id="progressPct"></span></div>
+    </div>
+
+    <div class="status-msg" id="statusMsg"></div>
+  </div>
+
+  <footer>Termux · Express · yt-dlp</footer>
+</div>
+
+<script>
+  const urlInput = document.getElementById('urlInput');
+  const fetchBtn = document.getElementById('fetchBtn');
+  const hintText = document.getElementById('hintText');
+  const videoCard = document.getElementById('videoCard');
+  const thumbImg = document.getElementById('thumbImg');
+  const durationTag = document.getElementById('durationTag');
+  const videoTitle = document.getElementById('videoTitle');
+  const videoUploader = document.getElementById('videoUploader');
+  const qualityGrid = document.getElementById('qualityGrid');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const progressZone = document.getElementById('progressZone');
+  const progressFill = document.getElementById('progressFill');
+  const progressStage = document.getElementById('progressStage');
+  const progressPct = document.getElementById('progressPct');
+  const statusMsg = document.getElementById('statusMsg');
+
+  let selectedQuality = 'auto';
+  let currentUrl = '';
+  let pollTimer = null;
+
+  qualityGrid.addEventListener('click', (e) => {
+    const opt = e.target.closest('.q-opt');
+    if (!opt || opt.classList.contains('disabled')) return;
+    document.querySelectorAll('.q-opt').forEach(o => o.classList.remove('active'));
+    opt.classList.add('active');
+    selectedQuality = opt.dataset.q;
+  });
+
+  function setHint(text, isError) {
+    hintText.textContent = text;
+    hintText.style.color = isError ? '#e2665f' : '';
+  }
+
+  function showStatus(msg, type) {
+    statusMsg.textContent = msg;
+    statusMsg.className = 'status-msg show ' + (type || '');
+  }
+
+  function hideStatus() {
+    statusMsg.className = 'status-msg';
+  }
+
+  fetchBtn.addEventListener('click', fetchInfo);
+  urlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') fetchInfo();
+  });
+
+  async function fetchInfo() {
+    const url = urlInput.value.trim();
+    if (!url) {
+      setHint('paste a youtube link first', true);
+      return;
+    }
+    hideStatus();
+    fetchBtn.disabled = true;
+    fetchBtn.textContent = 'Reading…';
+    setHint('reading video info', false);
+
+    try {
+      const res = await fetch('/api/info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not fetch info');
+
+      currentUrl = url;
+      videoTitle.textContent = data.title || 'Untitled';
+      videoUploader.textContent = data.uploader || '';
+      durationTag.textContent = data.duration || '';
+      thumbImg.src = data.thumbnail || '';
+
+      document.querySelectorAll('.q-opt').forEach(opt => {
+        const q = opt.dataset.q;
+        if (q === 'auto') return;
+        const available = data.availableQualities ? data.availableQualities[q] : true;
+        opt.classList.toggle('disabled', available === false);
+      });
+
+      videoCard.classList.add('show');
+      progressZone.classList.remove('show');
+      hideStatus();
+      setHint('works with youtube.com and youtu.be links', false);
+    } catch (err) {
+      setHint(err.message, true);
+    } finally {
+      fetchBtn.disabled = false;
+      fetchBtn.textContent = 'Fetch';
+    }
+  }
+
+  downloadBtn.addEventListener('click', startDownload);
+
+  async function startDownload() {
+    if (!currentUrl) return;
+    hideStatus();
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Starting…';
+    progressZone.classList.add('show');
+    progressFill.className = 'progress-fill indeterminate';
+    progressStage.textContent = 'preparing';
+    progressPct.textContent = '';
+
+    try {
+      const res = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: currentUrl, quality: selectedQuality })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not start download');
+
+      pollProgress(data.jobId);
+    } catch (err) {
+      showStatus(err.message, 'error');
+      resetDownloadBtn();
+    }
+  }
+
+  function pollProgress(jobId) {
+    progressStage.textContent = 'downloading';
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/progress/' + jobId);
+        const data = await res.json();
+        if (data.progress) {
+          progressFill.className = 'progress-fill';
+          progressFill.style.width = data.progress + '%';
+          progressPct.textContent = Math.round(data.progress) + '%';
+        }
+        if (data.error) {
+          clearInterval(pollTimer);
+          showStatus(data.error, 'error');
+          resetDownloadBtn();
+          return;
+        }
+        if (data.ready) {
+          clearInterval(pollTimer);
+          progressStage.textContent = 'done';
+          progressPct.textContent = '100%';
+          progressFill.className = 'progress-fill';
+          progressFill.style.width = '100%';
+          window.location.href = '/api/file/' + jobId;
+          showStatus('Ready — your download should start automatically.', 'success');
+          resetDownloadBtn();
+        }
+      } catch (err) {
+        clearInterval(pollTimer);
+        showStatus('Lost connection to server.', 'error');
+        resetDownloadBtn();
+      }
+    }, 1000);
+  }
+
+  function resetDownloadBtn() {
+    downloadBtn.disabled = false;
+    downloadBtn.textContent = 'Download';
+  }
+</script>
+
+</body>
+</html>
