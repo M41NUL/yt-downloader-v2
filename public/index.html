@@ -232,6 +232,12 @@ body {
   border: 1px solid var(--sep); border-radius: 10px; overflow: hidden;
   margin-bottom: 14px; background: #0d0d0f;
 }
+.playlist-list-inner {
+  max-height: 240px; overflow-y: auto;
+}
+.playlist-list-inner.expanded {
+  max-height: 420px;
+}
 .pl-row {
   display: flex; align-items: center; gap: 10px; padding: 9px 12px;
   font-size: 12px; color: var(--text2); border-bottom: 1px solid var(--sep);
@@ -239,7 +245,13 @@ body {
 .pl-row:last-child { border-bottom: none; }
 .pl-num { font-family: 'Menlo',monospace; font-size: 10px; color: var(--text4); width: 16px; text-align: right; flex-shrink:0; }
 .pl-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pl-more { padding: 9px 12px; font-size: 11px; color: var(--text4); font-family: 'Menlo',monospace; text-align: center; }
+.pl-more {
+  padding: 9px 12px; font-size: 11px; color: var(--red); font-family: 'Menlo',monospace;
+  text-align: center; cursor: pointer; background: transparent; border: none;
+  border-top: 1px solid var(--sep); width: 100%; transition: background .12s ease;
+}
+.pl-more:hover { background: var(--red-dim); }
+.pl-more:active { background: rgba(255,90,77,.15); }
 
 /* ─── DOWNLOAD BUTTON ─── */
 .dl-btn {
@@ -509,6 +521,7 @@ let selectedQuality = 'auto';
 let currentUrl = '';
 let currentTitle = '';
 let isPlaylistMode = false;
+let totalPlaylistCount = 0;
 let pollTimer = null;
 let fetchDebounce = null;
 
@@ -630,6 +643,7 @@ async function fetchInfo(url) {
 
 function renderVideo(data) {
   currentTitle = data.title || '';
+  totalPlaylistCount = 0;
   infoTitle.textContent = data.title || 'Untitled';
   infoUploader.textContent = data.uploader || 'Unknown uploader';
   thumbDuration.textContent = data.duration || '';
@@ -660,6 +674,7 @@ function renderPlaylist(data) {
   currentTitle = data.title || '';
   infoTitle.textContent = data.title || 'Playlist';
   const count = data.videoCount || (data.entries ? data.entries.length : 0);
+  totalPlaylistCount = count;
   infoUploader.textContent = data.uploader || 'Unknown uploader';
 
   thumbDuration.style.display = 'none';
@@ -675,17 +690,34 @@ function renderPlaylist(data) {
 
   const entries = data.entries || [];
   playlistList.innerHTML = '';
-  entries.slice(0, 10).forEach((e, i) => {
+
+  const inner = document.createElement('div');
+  inner.className = 'playlist-list-inner';
+  inner.id = 'playlistListInner';
+  entries.forEach((e, i) => {
     const row = document.createElement('div');
     row.className = 'pl-row';
     row.innerHTML = `<span class="pl-num">${i + 1}</span><span class="pl-title">${escapeHtml(e.title || 'Untitled')}</span>`;
-    playlistList.appendChild(row);
+    inner.appendChild(row);
   });
+  playlistList.appendChild(inner);
+
   if (count > entries.length) {
     const more = document.createElement('div');
     more.className = 'pl-more';
-    more.textContent = `+ ${count - entries.length} more`;
+    more.textContent = `+ ${count - entries.length} more (not shown — video count only)`;
     playlistList.appendChild(more);
+  } else if (entries.length > 6) {
+    // enough rows to make the scroll box worth expanding
+    const expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'pl-more';
+    expandBtn.textContent = `Show all ${entries.length} — scroll to view`;
+    expandBtn.addEventListener('click', () => {
+      inner.classList.add('expanded');
+      expandBtn.remove();
+    });
+    playlistList.appendChild(expandBtn);
   }
   playlistList.style.display = '';
 
@@ -747,7 +779,7 @@ async function startDownload() {
     const res = await fetch('/api/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: currentUrl, quality: selectedQuality, mode: selectedMode, title: currentTitle })
+      body: JSON.stringify({ url: currentUrl, quality: selectedQuality, mode: selectedMode, title: currentTitle, videoCount: totalPlaylistCount || undefined })
     });
 
     if (res.status === 429) {
@@ -788,7 +820,13 @@ function pollProgress(jobId) {
       }
 
       if (data.fileCount) {
-        fileCountText.textContent = data.fileCount + (data.fileCount === 1 ? ' file' : ' files');
+        if (isPlaylistMode && data.totalVideos) {
+          fileCountText.textContent = data.fileCount + ' / ' + data.totalVideos + ' videos';
+        } else if (isPlaylistMode) {
+          fileCountText.textContent = data.fileCount + (data.fileCount === 1 ? ' video' : ' videos');
+        } else {
+          fileCountText.textContent = data.fileCount + (data.fileCount === 1 ? ' file' : ' files');
+        }
         fileCountChip.classList.add('show');
       }
 
@@ -807,7 +845,7 @@ function pollProgress(jobId) {
         progressFill.style.width = '100%';
         window.location.href = '/api/file/' + jobId;
         const doneMsg = isPlaylistMode
-          ? `Ready — ${data.fileCount || ''} file(s) zipped. Your download should start automatically.`
+          ? `Ready — ${data.fileCount || ''}${data.totalVideos ? ' / ' + data.totalVideos : ''} video(s) zipped. Your download should start automatically.`
           : 'Ready — your download should start automatically.';
         showStatus(doneMsg, 'success', 'fa-circle-check');
         dlBtn.classList.add('success-flash');

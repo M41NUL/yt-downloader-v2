@@ -12,6 +12,14 @@ import socket
 import signal
 import subprocess
 
+try:
+    import termios
+    import tty
+    import select
+    _HAS_TERMIOS = True
+except ImportError:
+    _HAS_TERMIOS = False  # Windows fallback: no live refresh, behaves like a normal input()
+
 from banner import show_banner
 from utils import R, G, Y, C, O, W, BLD, DIM, RST, clear_screen, Spinner
 from config import FLASK_HOST, FLASK_PORT, HISTORY_FILE, DOWNLOAD_DIR, VERSION
@@ -23,6 +31,7 @@ DOWNLOAD_PATH = os.path.join(BASE_DIR, DOWNLOAD_DIR)
 
 flask_proc = None
 local_url = None
+server_start_time = None
 
 
 # ---------- helpers ----------
@@ -50,6 +59,82 @@ def box_line(text, width, color=W):
 
 def box_border(width, corner_l="+", corner_r="+"):
     return f"  {O}{BLD}{corner_l}{'-' * width}{corner_r}{RST}"
+
+
+def format_uptime(start_time):
+    if start_time is None:
+        return None
+    seconds = int(time.time() - start_time)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h}h {m}m"
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
+def live_input(prompt, redraw_fn, interval=1.0):
+    """
+    Like input(), but calls redraw_fn() every `interval` seconds while waiting
+    for the user to type something — used to auto-refresh uptime/stats on the
+    main menu. Falls back to a plain input() if the terminal doesn't support
+    raw mode (e.g. not a real TTY, Windows, or some Termux keyboard/IME quirks).
+    """
+    if not _HAS_TERMIOS or not sys.stdin.isatty():
+        return input(prompt)
+
+    fd = sys.stdin.fileno()
+    try:
+        old_settings = termios.tcgetattr(fd)
+    except (termios.error, OSError):
+        return input(prompt)
+
+    buffer = ""
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+        while True:
+            ready, _, _ = select.select([sys.stdin], [], [], interval)
+            if ready:
+                ch = sys.stdin.read(1)
+                if ch in ("\n", "\r"):
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    return buffer
+                elif ch in ("\x7f", "\b"):  # backspace
+                    if buffer:
+                        buffer = buffer[:-1]
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                elif ch == "\x03":  # Ctrl+C
+                    raise KeyboardInterrupt
+                elif ch.isprintable():
+                    buffer += ch
+                    sys.stdout.write(ch)
+                    sys.stdout.flush()
+            else:
+                # timeout: nobody typed anything yet — safe to redraw
+                if not buffer:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    redraw_fn()
+                    sys.stdout.write(prompt)
+                    sys.stdout.flush()
+                    tty.setcbreak(fd)
+    except (termios.error, OSError):
+        # raw-mode misbehaved on this device — bail out to a plain, reliable input()
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except Exception:
+            pass
+        remaining = input()
+        return buffer + remaining
+    finally:
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        except Exception:
+            pass
 
 
 def get_yt_dlp_version():
@@ -117,7 +202,7 @@ def get_live_stats():
 # ---------- process control ----------
 
 def start_tools():
-    global flask_proc, local_url
+    global flask_proc, local_url, server_start_time
 
     if flask_proc is not None:
         print(f"\n  {Y}Already running.{RST}")
@@ -140,6 +225,7 @@ def start_tools():
         return
 
     spinner.stop("Flask backend is running.")
+    server_start_time = time.time()
 
     lan_ip = get_lan_ip()
     local_url = f"http://{lan_ip}:{FLASK_PORT}"
@@ -157,7 +243,7 @@ def start_tools():
 
 
 def stop_tools(pause=True):
-    global flask_proc, local_url
+    global flask_proc, local_url, server_start_time
 
     if flask_proc is not None:
         spinner = Spinner("Stopping server...").start()
@@ -171,6 +257,7 @@ def stop_tools(pause=True):
                 pass
         flask_proc = None
         local_url = None
+        server_start_time = None
         spinner.stop("Stopped. Server closed.")
     else:
         print(f"\n  {Y}Nothing is running.{RST}")
@@ -377,6 +464,10 @@ def show_menu():
     status = f"{G}RUNNING{RST}" if flask_proc is not None else f"{DIM}{W}STOPPED{RST}"
     ytdlp_version = get_yt_dlp_version()
     status_line = f"  {W}Status: {status}"
+    if flask_proc is not None:
+        uptime = format_uptime(server_start_time)
+        if uptime:
+            status_line += f"  {DIM}{W}|{RST}  {DIM}{W}uptime {uptime}{RST}"
     if ytdlp_version:
         status_line += f"  {DIM}{W}|{RST}  {DIM}{W}yt-dlp {ytdlp_version}{RST}"
     print(status_line)
@@ -422,7 +513,7 @@ def main():
 
     while True:
         show_menu()
-        choice = input(f"  {O}{BLD}> {RST}").strip()
+        choice = live_input(f"  {O}{BLD}> {RST}", show_menu).strip()
 
         if choice == "1":
             start_tools()

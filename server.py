@@ -187,15 +187,12 @@ def info():
 
             data_json = json.loads(result.stdout)
             entries = data_json.get("entries", []) or []
-            first_id = entries[0].get("id") if entries else None
-            cover_thumbnail = f"https://i.ytimg.com/vi/{first_id}/mqdefault.jpg" if first_id else None
             return jsonify({
                 "isPlaylist": True,
                 "title": data_json.get("title") or "Playlist",
                 "uploader": data_json.get("uploader") or data_json.get("channel"),
                 "videoCount": len(entries),
-                "thumbnail": cover_thumbnail,
-                "entries": [{"title": e.get("title"), "id": e.get("id")} for e in entries[:10]],
+                "entries": [{"title": e.get("title"), "id": e.get("id")} for e in entries[:100]],
             })
 
         result = subprocess.run(
@@ -271,6 +268,7 @@ def download():
     quality = data.get("quality", get_setting("default_quality", "auto"))
     mode = data.get("mode", "video")  # "video" or "audio"
     title = data.get("title", "")
+    total_videos = data.get("videoCount")  # optional hint from /api/info, for X/Y progress display
 
     if not url or not is_valid_youtube_url(url):
         return jsonify({"error": "Valid YouTube URL required"}), 400
@@ -278,6 +276,10 @@ def download():
         quality = "auto"
     if mode not in ("video", "audio"):
         mode = "video"
+    try:
+        total_videos = int(total_videos) if total_videos else None
+    except (ValueError, TypeError):
+        total_videos = None
 
     playlist = is_playlist_url(url)
     job_id = uuid.uuid4().hex[:16]
@@ -298,6 +300,7 @@ def download():
             "file_path": None, "file_paths": None,
             "mode": mode, "title": title,
             "is_playlist": playlist, "job_dir": job_dir,
+            "total_videos": total_videos if playlist else None,
         }
 
     def set_progress(pct):
@@ -382,14 +385,30 @@ def progress(job_id):
         job = JOBS.get(job_id)
         if not job:
             return jsonify({"error": "Job not found"}), 404
-        return jsonify({
-            "done": job["done"],
-            "error": job["error"],
-            "progress": job["progress"],
-            "ready": job["done"] and not job["error"],
-            "isPlaylist": job.get("is_playlist", False),
-            "fileCount": len(job["file_paths"]) if job.get("file_paths") else (1 if job.get("file_path") else 0),
-        })
+        is_playlist = job.get("is_playlist", False)
+        job_dir = job.get("job_dir")
+        total_videos = job.get("total_videos")
+
+    # count fully-written files live, even mid-download, so the UI can show "X / Y"
+    if is_playlist and job_dir and os.path.isdir(job_dir):
+        # ignore .part/.ytdl temp files yt-dlp writes while a file is still downloading
+        finished = [
+            f for f in glob.glob(os.path.join(job_dir, "*"))
+            if not f.endswith((".part", ".ytdl", ".temp"))
+        ]
+        live_file_count = len(finished)
+    else:
+        live_file_count = len(job["file_paths"]) if job.get("file_paths") else (1 if job.get("file_path") else 0)
+
+    return jsonify({
+        "done": job["done"],
+        "error": job["error"],
+        "progress": job["progress"],
+        "ready": job["done"] and not job["error"],
+        "isPlaylist": is_playlist,
+        "fileCount": live_file_count,
+        "totalVideos": total_videos,
+    })
 
 
 @app.route("/api/stats")
