@@ -12,14 +12,6 @@ import socket
 import signal
 import subprocess
 
-try:
-    import termios
-    import tty
-    import select
-    _HAS_TERMIOS = True
-except ImportError:
-    _HAS_TERMIOS = False  # Windows fallback: no live refresh, behaves like a normal input()
-
 from banner import show_banner
 from utils import R, G, Y, C, O, W, BLD, DIM, RST, clear_screen, Spinner
 from config import FLASK_HOST, FLASK_PORT, HISTORY_FILE, DOWNLOAD_DIR, VERSION
@@ -72,69 +64,6 @@ def format_uptime(start_time):
     if m > 0:
         return f"{m}m {s}s"
     return f"{s}s"
-
-
-def live_input(prompt, redraw_fn, interval=1.0):
-    """
-    Like input(), but calls redraw_fn() every `interval` seconds while waiting
-    for the user to type something — used to auto-refresh uptime/stats on the
-    main menu. Falls back to a plain input() if the terminal doesn't support
-    raw mode (e.g. not a real TTY, Windows, or some Termux keyboard/IME quirks).
-    """
-    if not _HAS_TERMIOS or not sys.stdin.isatty():
-        return input(prompt)
-
-    fd = sys.stdin.fileno()
-    try:
-        old_settings = termios.tcgetattr(fd)
-    except (termios.error, OSError):
-        return input(prompt)
-
-    buffer = ""
-    try:
-        tty.setcbreak(fd)
-        sys.stdout.write(prompt)
-        sys.stdout.flush()
-        while True:
-            ready, _, _ = select.select([sys.stdin], [], [], interval)
-            if ready:
-                ch = sys.stdin.read(1)
-                if ch in ("\n", "\r"):
-                    sys.stdout.write("\n")
-                    sys.stdout.flush()
-                    return buffer
-                elif ch in ("\x7f", "\b"):  # backspace
-                    if buffer:
-                        buffer = buffer[:-1]
-                        sys.stdout.write("\b \b")
-                        sys.stdout.flush()
-                elif ch == "\x03":  # Ctrl+C
-                    raise KeyboardInterrupt
-                elif ch.isprintable():
-                    buffer += ch
-                    sys.stdout.write(ch)
-                    sys.stdout.flush()
-            else:
-                # timeout: nobody typed anything yet — safe to redraw
-                if not buffer:
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                    redraw_fn()
-                    sys.stdout.write(prompt)
-                    sys.stdout.flush()
-                    tty.setcbreak(fd)
-    except (termios.error, OSError):
-        # raw-mode misbehaved on this device — bail out to a plain, reliable input()
-        try:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        except Exception:
-            pass
-        remaining = input()
-        return buffer + remaining
-    finally:
-        try:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        except Exception:
-            pass
 
 
 def get_yt_dlp_version():
@@ -513,7 +442,7 @@ def main():
 
     while True:
         show_menu()
-        choice = live_input(f"  {O}{BLD}> {RST}", show_menu).strip()
+        choice = input(f"  {O}{BLD}> {RST}").strip()
 
         if choice == "1":
             start_tools()

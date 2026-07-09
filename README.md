@@ -62,7 +62,7 @@ This shows:
 - **6** → manually force a yt-dlp version check/update right now, instead of waiting for the automatic once-a-day check.
 - **0** → stops everything and exits — warns if any files are still sitting in `downloads/` first.
 
-The main menu also shows live status: whether the server is running, the current yt-dlp version, how many downloads are active right now (including playlist jobs), and how many leftover files are pending cleanup.
+The main menu also shows live status: whether the server is running, uptime since it started, the current yt-dlp version, how many downloads are active right now (including playlist jobs), and how many leftover files are pending cleanup.
 
 Open the printed link in any browser **on a device connected to the same WiFi** — that's your full frontend + backend, ready to paste a YouTube URL and download.
 
