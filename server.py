@@ -187,11 +187,19 @@ def info():
 
             data_json = json.loads(result.stdout)
             entries = data_json.get("entries", []) or []
+
+            first_thumbnail = None
+            if entries:
+                first_id = entries[0].get("id")
+                if first_id:
+                    first_thumbnail = f"https://i.ytimg.com/vi/{first_id}/hqdefault.jpg"
+
             return jsonify({
                 "isPlaylist": True,
                 "title": data_json.get("title") or "Playlist",
                 "uploader": data_json.get("uploader") or data_json.get("channel"),
                 "videoCount": len(entries),
+                "thumbnail": first_thumbnail,
                 "entries": [{"title": e.get("title"), "id": e.get("id")} for e in entries[:100]],
             })
 
@@ -388,23 +396,40 @@ def progress(job_id):
         is_playlist = job.get("is_playlist", False)
         job_dir = job.get("job_dir")
         total_videos = job.get("total_videos")
+        mode = job.get("mode")
+        done = job["done"]
+        error = job["error"]
+        progress_pct = job["progress"]
+        file_paths = job.get("file_paths")
+        file_path = job.get("file_path")
 
-    # count fully-written files live, even mid-download, so the UI can show "X / Y"
+    # count fully-finished files live, even mid-download, so the UI can show "X / Y".
+    # Only count the FINAL output extension — yt-dlp/ffmpeg create intermediate
+    # files while merging/converting/embedding (e.g. raw .m4a before mp3 conversion,
+    # temp .jpg/.webp thumbnails before embedding), and counting those too makes
+    # the number flicker up and down instead of only ever increasing.
     if is_playlist and job_dir and os.path.isdir(job_dir):
-        # ignore .part/.ytdl temp files yt-dlp writes while a file is still downloading
-        finished = [
-            f for f in glob.glob(os.path.join(job_dir, "*"))
-            if not f.endswith((".part", ".ytdl", ".temp"))
-        ]
+        final_ext = ".mp3" if mode == "audio" else ".mp4"
+        finished = glob.glob(os.path.join(job_dir, f"*{final_ext}"))
         live_file_count = len(finished)
+        # never let the displayed count go backwards (extra safety against any
+        # transient filesystem state during merge/convert/embed steps)
+        with JOBS_LOCK:
+            job = JOBS.get(job_id)
+            if job is not None:
+                prev_max = job.get("max_file_count", 0)
+                if live_file_count < prev_max:
+                    live_file_count = prev_max
+                else:
+                    job["max_file_count"] = live_file_count
     else:
-        live_file_count = len(job["file_paths"]) if job.get("file_paths") else (1 if job.get("file_path") else 0)
+        live_file_count = len(file_paths) if file_paths else (1 if file_path else 0)
 
     return jsonify({
-        "done": job["done"],
-        "error": job["error"],
-        "progress": job["progress"],
-        "ready": job["done"] and not job["error"],
+        "done": done,
+        "error": error,
+        "progress": progress_pct,
+        "ready": done and not error,
         "isPlaylist": is_playlist,
         "fileCount": live_file_count,
         "totalVideos": total_videos,
