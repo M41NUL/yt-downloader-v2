@@ -249,18 +249,28 @@ def build_download_args(url, mode, quality, output_template, is_playlist):
     return args
 
 
+_PROGRESS_RE = re.compile(
+    r"([\d.]+)%"
+    r"(?:.*?at\s+([\d.]+\s*[KMG]?i?B/s))?"
+    r"(?:.*?ETA\s+([\d:]+|Unknown))?"
+)
+
+
 def run_yt_dlp(args, on_progress):
-    """Run yt-dlp once, streaming progress lines to on_progress(pct). Returns returncode."""
+    """Run yt-dlp once, streaming progress (percent, speed, ETA) to on_progress(). Returns returncode."""
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, bufsize=1)
     for line in proc.stdout:
         if "%" in line:
-            try:
-                pct_str = line.split("%")[0].strip().split()[-1]
-                pct = float(pct_str)
-                on_progress(pct)
-            except (ValueError, IndexError):
-                pass
+            match = _PROGRESS_RE.search(line)
+            if match:
+                try:
+                    pct = float(match.group(1))
+                except (ValueError, TypeError):
+                    continue
+                speed = match.group(2).replace(" ", "") if match.group(2) else None
+                eta = match.group(3) if match.group(3) and match.group(3) != "Unknown" else None
+                on_progress(pct, speed, eta)
     proc.wait()
     return proc.returncode
 
@@ -309,13 +319,18 @@ def download():
             "mode": mode, "title": title,
             "is_playlist": playlist, "job_dir": job_dir,
             "total_videos": total_videos if playlist else None,
+            "speed": None, "eta": None,
         }
 
-    def set_progress(pct):
+    def set_progress(pct, speed=None, eta=None):
         with JOBS_LOCK:
             job = JOBS.get(job_id)
             if job:
                 job["progress"] = pct
+                if speed:
+                    job["speed"] = speed
+                if eta:
+                    job["eta"] = eta
 
     def run_download():
         label = f"[{mode.upper()}]{' [PLAYLIST]' if playlist else ''} {title or url}"
@@ -402,6 +417,8 @@ def progress(job_id):
         progress_pct = job["progress"]
         file_paths = job.get("file_paths")
         file_path = job.get("file_path")
+        speed = job.get("speed")
+        eta = job.get("eta")
 
     # count fully-finished files live, even mid-download, so the UI can show "X / Y".
     # Only count the FINAL output extension — yt-dlp/ffmpeg create intermediate
@@ -433,6 +450,8 @@ def progress(job_id):
         "isPlaylist": is_playlist,
         "fileCount": live_file_count,
         "totalVideos": total_videos,
+        "speed": speed,
+        "eta": eta,
     })
 
 

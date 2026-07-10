@@ -4,7 +4,7 @@
 # ─────────────────────────────────────────
 
 TOOL_NAME    = "YT DOWNLOADER"
-VERSION      = "2.0.0"
+VERSION      = "1.1.0"
 
 DEV_NAME     = "Md. Mainul Islam"
 DEV_BRAND    = "CODEX-M41NUL"

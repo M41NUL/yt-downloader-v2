@@ -302,6 +302,13 @@ body {
   border-radius: 100px; padding: 2px 9px; color: var(--red); font-weight: 600;
 }
 .file-count-chip.show { display: inline-flex; }
+.speed-chip {
+  display: none; align-items: center; gap: 4px;
+  font-size: 10.5px; background: rgba(10,132,255,.12); border: 1px solid rgba(10,132,255,.3);
+  border-radius: 100px; padding: 2px 9px; color: var(--blue); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.speed-chip.show { display: inline-flex; }
 
 .status-box {
   display: none; align-items: flex-start; gap: 9px;
@@ -461,7 +468,8 @@ body {
     <div class="progress-label">
       <span id="progressStage">preparing</span>
       <span class="progress-right">
-        <span class="file-count-chip" id="fileCountChip"><i class="fa-solid fa-layer-group"></i><span id="fileCountText"></span></span>
+        <span class="speed-chip" id="speedChip"><i class="fa-solid fa-gauge-high"></i><span id="speedText"></span></span>
+        <span class="file-count-chip" id="fileCountChip"><i class="fa-solid fa-layer-group" id="fileCountIcon"></i><span id="fileCountText"></span></span>
         <span id="progressPct"></span>
       </span>
     </div>
@@ -513,7 +521,10 @@ const progressFill = $('progressFill');
 const progressStage = $('progressStage');
 const progressPct = $('progressPct');
 const fileCountChip = $('fileCountChip');
+const fileCountIcon = $('fileCountIcon');
 const fileCountText = $('fileCountText');
+const speedChip = $('speedChip');
+const speedText = $('speedText');
 const statusBox = $('statusBox');
 
 let selectedMode = 'video';
@@ -528,6 +539,17 @@ let fetchDebounce = null;
 $('footerYear').textContent = new Date().getFullYear();
 
 function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function formatSpeed(raw) {
+  // yt-dlp reports speed like "3.45MiB/s" or "850.00KiB/s" — normalize to "3.45 MB/s"
+  if (!raw) return null;
+  const match = raw.match(/^([\d.]+)\s*([KMG]?i?B)\/s$/i);
+  if (!match) return null;
+  const value = parseFloat(match[1]);
+  if (isNaN(value)) return null;
+  let unit = match[2].toUpperCase().replace('I', ''); // KiB -> KB, MiB -> MB
+  return `${value.toFixed(value < 10 ? 2 : 1)} ${unit}/s`;
+}
 
 function isLikelyYoutubeUrl(v) {
   try {
@@ -774,6 +796,7 @@ async function startDownload() {
   progressStage.textContent = 'preparing';
   progressPct.textContent = '';
   fileCountChip.classList.remove('show');
+  speedChip.classList.remove('show');
 
   try {
     const res = await fetch('/api/download', {
@@ -819,13 +842,26 @@ function pollProgress(jobId) {
         progressPct.textContent = Math.round(data.progress) + '%';
       }
 
+      const speedDisplay = formatSpeed(data.speed);
+      if (speedDisplay) {
+        speedText.textContent = speedDisplay;
+        speedChip.classList.add('show');
+      } else {
+        speedChip.classList.remove('show');
+      }
+
       if (data.fileCount) {
+        const isAudio = selectedMode === 'audio';
+        fileCountIcon.className = isAudio ? 'fa-solid fa-music' : 'fa-solid fa-film';
+        const unitWord = isAudio ? 'audio' : 'video';       // "audio" stays same in singular/plural
+        const unitWordPlural = isAudio ? 'audio' : 'videos';
+
         if (isPlaylistMode && data.totalVideos) {
-          fileCountText.textContent = data.fileCount + ' / ' + data.totalVideos + ' videos';
+          fileCountText.textContent = data.fileCount + ' / ' + data.totalVideos + ' ' + unitWordPlural;
         } else if (isPlaylistMode) {
-          fileCountText.textContent = data.fileCount + (data.fileCount === 1 ? ' video' : ' videos');
+          fileCountText.textContent = data.fileCount + ' ' + (data.fileCount === 1 ? unitWord : unitWordPlural);
         } else {
-          fileCountText.textContent = data.fileCount + (data.fileCount === 1 ? ' file' : ' files');
+          fileCountText.textContent = data.fileCount + ' ' + (data.fileCount === 1 ? unitWord : unitWordPlural);
         }
         fileCountChip.classList.add('show');
       }
@@ -843,9 +879,11 @@ function pollProgress(jobId) {
         progressPct.textContent = '100%';
         progressFill.className = 'progress-fill';
         progressFill.style.width = '100%';
+        speedChip.classList.remove('show');
         window.location.href = '/api/file/' + jobId;
+        const unitLabel = selectedMode === 'audio' ? 'audio track(s)' : 'video(s)';
         const doneMsg = isPlaylistMode
-          ? `Ready — ${data.fileCount || ''}${data.totalVideos ? ' / ' + data.totalVideos : ''} video(s) zipped. Your download should start automatically.`
+          ? `Ready — ${data.fileCount || ''}${data.totalVideos ? ' / ' + data.totalVideos : ''} ${unitLabel} zipped. Your download should start automatically.`
           : 'Ready — your download should start automatically.';
         showStatus(doneMsg, 'success', 'fa-circle-check');
         dlBtn.classList.add('success-flash');
